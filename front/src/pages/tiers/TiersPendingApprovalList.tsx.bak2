@@ -1,0 +1,568 @@
+import { useState, useEffect, useContext } from 'react';
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Chip,
+  CircularProgress,
+  Tabs,
+  Tab,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Alert,
+  AlertTitle,
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
+  Grid,
+  Paper,
+  TablePagination,
+} from '@mui/material';
+import {
+  CheckCircle as ApproveIcon,
+  Cancel as RejectIcon,
+  Visibility as ViewIcon,
+  Delete as DeleteIcon,
+  Warning as WarningIcon,
+  Info as InfoIcon,
+} from '@mui/icons-material';
+import { TierPendingApprovalApi } from '../../services/TierPendingApprovalApi';
+import { TierPendingApproval, ApprovalStatus } from '../../types';
+import { SnackbarContext } from '../../providers/SnackBarProvider';
+import { useNavigate } from 'react-router-dom';
+import ConfirmDeleteDialog from '../../components/ConfirmDeleteDialog';
+import AuthApi, { User } from '../../services/AuthApi';
+
+export default function TiersPendingApprovalList() {
+  const snackBarProvider = useContext(SnackbarContext);
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [pendingTiers, setPendingTiers] = useState<TierPendingApproval[]>([]);
+  const [currentTab, setCurrentTab] = useState<ApprovalStatus>(ApprovalStatus.PENDING);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedTier, setSelectedTier] = useState<TierPendingApproval | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [reviewComment, setReviewComment] = useState('');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [statistics, setStatistics] = useState({
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    total: 0,
+  });
+
+  useEffect(() => {
+    loadData();
+    loadStatistics();
+  }, [currentTab]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const data = await TierPendingApprovalApi.getAll(currentTab);
+      setPendingTiers(data);
+    } catch (error) {
+      console.error('Erreur de chargement:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStatistics = async () => {
+    try {
+      const stats = await TierPendingApprovalApi.getStatistics();
+      setStatistics(stats);
+    } catch (error) {
+      console.error('Erreur de chargement des statistiques:', error);
+    }
+  };
+
+  const handleOpenDetailDialog = (tier: TierPendingApproval) => {
+    setSelectedTier(tier);
+    setDetailDialogOpen(true);
+  };
+
+  const handleCloseDetailDialog = () => {
+    setDetailDialogOpen(false);
+    setSelectedTier(null);
+  };
+
+  const handleOpenApproveDialog = (tier: TierPendingApproval) => {
+    setSelectedTier(tier);
+    setReviewerName('');
+    setReviewComment('');
+    setApproveDialogOpen(true);
+  };
+
+  const handleCloseApproveDialog = () => {
+    setApproveDialogOpen(false);
+    setSelectedTier(null);
+    setReviewerName('');
+    setReviewComment('');
+  };
+
+  const handleOpenRejectDialog = (tier: TierPendingApproval) => {
+    setSelectedTier(tier);
+    setReviewerName('');
+    setReviewComment('');
+    setRejectDialogOpen(true);
+  };
+
+  const handleCloseRejectDialog = () => {
+    setRejectDialogOpen(false);
+    setSelectedTier(null);
+    setReviewerName('');
+    setReviewComment('');
+  };
+
+  const handleOpenDeleteDialog = (tier: TierPendingApproval) => {
+    setSelectedTier(tier);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setSelectedTier(null);
+  };
+
+  const handleApprove = async () => {
+    if (!selectedTier || !reviewerName) return;
+
+    try {
+      await TierPendingApprovalApi.approve(selectedTier.uuid, {
+        reviewedBy: reviewerName,
+        reviewComment: reviewComment || undefined,
+      });
+      snackBarProvider?.showSnackbarMessage('Tiers approuvé avec succès', 'success');
+      handleCloseApproveDialog();
+      loadData();
+      loadStatistics();
+    } catch (error) {
+      console.error('Erreur d\'approbation:', error);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!selectedTier || !reviewerName || !reviewComment) return;
+
+    try {
+      await TierPendingApprovalApi.reject(selectedTier.uuid, {
+        reviewedBy: reviewerName,
+        reviewComment,
+      });
+      snackBarProvider?.showSnackbarMessage('Tiers rejeté', 'info');
+      handleCloseRejectDialog();
+      loadData();
+      loadStatistics();
+    } catch (error) {
+      console.error('Erreur de rejet:', error);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedTier) return;
+
+    try {
+      await TierPendingApprovalApi.delete(selectedTier.uuid);
+      snackBarProvider?.showSnackbarMessage('Tiers en attente supprimé', 'success');
+      handleCloseDeleteDialog();
+      loadData();
+      loadStatistics();
+    } catch (error) {
+      console.error('Erreur de suppression:', error);
+    }
+  };
+
+  const getStatusChip = (status: ApprovalStatus) => {
+    switch (status) {
+      case ApprovalStatus.PENDING:
+        return <Chip label="En attente" color="warning" size="small" />;
+      case ApprovalStatus.APPROVED:
+        return <Chip label="Approuvé" color="success" size="small" />;
+      case ApprovalStatus.REJECTED:
+        return <Chip label="Rejeté" color="error" size="small" />;
+      default:
+        return <Chip label={status} size="small" />;
+    }
+  };
+
+  const getSourceChip = (source: string) => {
+    const sourceColors: Record<string, 'primary' | 'secondary' | 'default'> = {
+      etl: 'primary',
+      manual: 'secondary',
+      api: 'default',
+    };
+
+    return <Chip label={source.toUpperCase()} color={sourceColors[source] || 'default'} size="small" />;
+  };
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Box p={3}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4" component="h1" fontWeight={600}>
+          Workflow d'Approbation des Tiers
+        </Typography>
+      </Box>
+
+      {/* Statistiques */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper elevation={2} sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4" color="warning.main" fontWeight={600}>
+              {statistics.pending}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              En attente
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper elevation={2} sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4" color="success.main" fontWeight={600}>
+              {statistics.approved}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Approuvés
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper elevation={2} sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4" color="error.main" fontWeight={600}>
+              {statistics.rejected}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Rejetés
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper elevation={2} sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4" color="primary.main" fontWeight={600}>
+              {statistics.total}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Total
+            </Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Card>
+        <Tabs
+          value={currentTab}
+          onChange={(_, newValue) => setCurrentTab(newValue)}
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab label={`En attente (${statistics.pending})`} value={ApprovalStatus.PENDING} />
+          <Tab label={`Approuvés (${statistics.approved})`} value={ApprovalStatus.APPROVED} />
+          <Tab label={`Rejetés (${statistics.rejected})`} value={ApprovalStatus.REJECTED} />
+        </Tabs>
+
+        <CardContent>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Nom / Raison sociale</TableCell>
+                  <TableCell>SIREN</TableCell>
+                  <TableCell>Source</TableCell>
+                  <TableCell>Soumis par</TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Doublons</TableCell>
+                  <TableCell>Statut</TableCell>
+                  <TableCell align="right">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {pendingTiers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center">
+                      <Typography color="text.secondary">
+                        Aucun tiers {currentTab === ApprovalStatus.PENDING ? 'en attente' : currentTab === ApprovalStatus.APPROVED ? 'approuvé' : 'rejeté'}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pendingTiers.map((tier) => (
+                    <TableRow key={tier.uuid} hover>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={600}>
+                          {tier.nomAffichage || tier.raisonSociale || '-'}
+                        </Typography>
+                        {tier.externalReference && (
+                          <Typography variant="caption" color="text.secondary">
+                            Réf: {tier.externalReference}
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>{tier.siren || '-'}</TableCell>
+                      <TableCell>{getSourceChip(tier.source)}</TableCell>
+                      <TableCell>{tier.submittedBy || '-'}</TableCell>
+                      <TableCell>
+                        {new Date(tier.dateCreation).toLocaleDateString('fr-FR')}
+                      </TableCell>
+                      <TableCell>
+                        {tier.potentialDuplicates && tier.potentialDuplicates.length > 0 ? (
+                          <Chip
+                            icon={<WarningIcon />}
+                            label={`${tier.potentialDuplicates.length}`}
+                            color="warning"
+                            size="small"
+                          />
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                      <TableCell>{getStatusChip(tier.status)}</TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" onClick={() => handleOpenDetailDialog(tier)} title="Détails">
+                          <ViewIcon />
+                        </IconButton>
+                        {tier.status === ApprovalStatus.PENDING && (
+                          <>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenApproveDialog(tier)}
+                              color="success"
+                              title="Approuver"
+                            >
+                              <ApproveIcon />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenRejectDialog(tier)}
+                              color="error"
+                              title="Rejeter"
+                            >
+                              <RejectIcon />
+                            </IconButton>
+                          </>
+                        )}
+                        <IconButton
+                          size="small"
+                          onClick={() => handleOpenDeleteDialog(tier)}
+                          color="error"
+                          title="Supprimer"
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
+
+      {/* Dialog Détails */}
+      <Dialog open={detailDialogOpen} onClose={handleCloseDetailDialog} maxWidth="md" fullWidth>
+        <DialogTitle>Détails du tiers en attente</DialogTitle>
+        <DialogContent>
+          {selectedTier && (
+            <Box sx={{ mt: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Nom d'affichage
+                  </Typography>
+                  <Typography variant="body1">{selectedTier.nomAffichage || '-'}</Typography>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Raison sociale
+                  </Typography>
+                  <Typography variant="body1">{selectedTier.raisonSociale || '-'}</Typography>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    SIREN
+                  </Typography>
+                  <Typography variant="body1">{selectedTier.siren || '-'}</Typography>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    SIRET
+                  </Typography>
+                  <Typography variant="body1">{selectedTier.siret || '-'}</Typography>
+                </Grid>
+              </Grid>
+
+              {selectedTier.submissionComment && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <AlertTitle>Commentaire de soumission</AlertTitle>
+                  {selectedTier.submissionComment}
+                </Alert>
+              )}
+
+              {selectedTier.potentialDuplicates && selectedTier.potentialDuplicates.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  <AlertTitle>Doublons potentiels détectés</AlertTitle>
+                  <List dense>
+                    {selectedTier.potentialDuplicates.map((dup) => (
+                      <ListItem key={dup.uuid}>
+                        <ListItemText
+                          primary={`${dup.nomAffichage || 'Sans nom'} (${dup.siren || 'N/A'})`}
+                          secondary={`Score de similarité: ${dup.matchScore}%`}
+                        />
+                        <Button size="small" onClick={() => navigate(`/tiers/${dup.uuid}`)}>
+                          Voir
+                        </Button>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Alert>
+              )}
+
+              {selectedTier.reviewComment && (
+                <Alert severity={selectedTier.status === ApprovalStatus.APPROVED ? 'success' : 'error'} sx={{ mt: 2 }}>
+                  <AlertTitle>
+                    Commentaire de {selectedTier.status === ApprovalStatus.APPROVED ? 'validation' : 'rejet'}
+                  </AlertTitle>
+                  {selectedTier.reviewComment}
+                  <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                    Par {selectedTier.reviewedBy} le{' '}
+                    {selectedTier.reviewedAt && new Date(selectedTier.reviewedAt).toLocaleString('fr-FR')}
+                  </Typography>
+                </Alert>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDetailDialog}>Fermer</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog Approbation */}
+      <Dialog open={approveDialogOpen} onClose={handleCloseApproveDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <ApproveIcon color="success" />
+            Approuver le tiers
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Votre nom"
+              value={reviewerName}
+              onChange={(e) => setReviewerName(e.target.value)}
+              required
+              fullWidth
+            />
+            <TextField
+              label="Commentaire (optionnel)"
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              multiline
+              rows={3}
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseApproveDialog}>Annuler</Button>
+          <Button
+            onClick={handleApprove}
+            variant="contained"
+            color="success"
+            disabled={!reviewerName}
+            startIcon={<ApproveIcon />}
+          >
+            Approuver
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog Rejet */}
+      <Dialog open={rejectDialogOpen} onClose={handleCloseRejectDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <RejectIcon color="error" />
+            Rejeter le tiers
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="warning">
+              <AlertTitle>Attention</AlertTitle>
+              Le rejet d'un tiers nécessite un commentaire expliquant la raison du refus.
+            </Alert>
+            <TextField
+              label="Votre nom"
+              value={reviewerName}
+              onChange={(e) => setReviewerName(e.target.value)}
+              required
+              fullWidth
+            />
+            <TextField
+              label="Motif du rejet"
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              multiline
+              rows={4}
+              required
+              fullWidth
+              helperText="Minimum 10 caractères"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseRejectDialog}>Annuler</Button>
+          <Button
+            onClick={handleReject}
+            variant="contained"
+            color="error"
+            disabled={!reviewerName || reviewComment.length < 10}
+            startIcon={<RejectIcon />}
+          >
+            Rejeter
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog Suppression */}
+      <ConfirmDeleteDialog
+        open={deleteDialogOpen}
+        onClose={handleCloseDeleteDialog}
+        onConfirm={handleConfirmDelete}
+        title="Supprimer ce tiers en attente"
+        message="Cette action est irréversible. Pour confirmer la suppression, veuillez saisir"
+        itemName={
+          selectedTier
+            ? `${selectedTier.nomAffichage || selectedTier.raisonSociale} (${selectedTier.siren || 'N/A'})`
+            : ''
+        }
+        confirmationText="supprimer"
+      />
+    </Box>
+  );
+}
